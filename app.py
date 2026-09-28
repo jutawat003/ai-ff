@@ -135,11 +135,11 @@ def recommend_careers(v: dict, achieved: bool):
     if achieved and surplus > 0 and credit >= 700:
         recs.append(("ขยายธุรกิจเล็ก ๆ โดยใช้สินเชื่อธุรกิจ SME",
                      "ต่อยอดรายได้ด้วยเงินทุนจากสถาบันการเงิน",
-                     f"ผลทำนายบรรลุเป้าหมาย มีเงินเหลือ {surplus:,.0f} บาทต่อเดือน และเครดิตสกอร์ดี ({credit:,.0f})"))
+                     f"ผลทำนายพร้อมต่อยอด มีเงินเหลือ {surplus:,.0f} บาทต่อเดือน และเครดิตสกอร์ดี ({credit:,.0f})"))
     elif not achieved:
         recs.append(("เริ่มต้นเล็ก ๆ ทดลองตลาดก่อนขยาย",
                      "ลดความเสี่ยงระหว่างสร้างรายได้เสริม",
-                     "ผลทำนายยังไม่บรรลุเป้าหมาย จึงควรสร้างรายได้เสริมก่อนเพิ่มความเสี่ยง"))
+                     "ผลทำนายชี้ว่าควรเสริมรายได้ก่อน จึงควรสร้างรายได้เสริมก่อนเพิ่มความเสี่ยง"))
 
     return recs[:3]
 
@@ -215,7 +215,7 @@ for i, var in enumerate(domain.attributes):
 threshold = None
 if not is_classification:
     threshold = st.number_input(
-        f"เกณฑ์{th(class_var.name)}ที่ถือว่า 'บรรลุเป้าหมาย' (ตั้งแต่ค่านี้ขึ้นไป)",
+        f"เกณฑ์{th(class_var.name)}ที่ถือว่า 'พร้อมต่อยอด' (ตั้งแต่ค่านี้ขึ้นไป)",
         value=30.0,
         format="%.2f",
         help="ปรับให้เหมาะกับช่วงคะแนนในข้อมูลของคุณ",
@@ -240,9 +240,9 @@ if st.button("ทำนายผล"):
 
         achieved = str(label).strip().lower() in POSITIVE_LABELS
         if achieved:
-            st.success(f"✅ ผลทำนาย: บรรลุเป้าหมายการออมเงิน ({label})")
+            st.success(f"✅ ผลทำนาย: พร้อมต่อยอด ({label})")
         else:
-            st.warning(f"⚠️ ผลทำนาย: ไม่บรรลุเป้าหมายการออมเงิน ({label})")
+            st.warning(f"⚠️ ผลทำนาย: ควรเสริมรายได้ก่อน ({label})")
 
         st.write("ความน่าจะเป็น (Probability):")
         for cls_name, p in zip(class_var.values, probs[0]):
@@ -256,9 +256,9 @@ if st.button("ทำนายผล"):
 
         achieved = pred >= threshold
         if achieved:
-            st.success(f"✅ ผลทำนาย: บรรลุเป้าหมาย (คะแนน {pred:,.2f} ≥ เกณฑ์ {threshold:,.2f})")
+            st.success(f"✅ ผลทำนาย: พร้อมต่อยอด (คะแนน {pred:,.2f} ≥ เกณฑ์ {threshold:,.2f})")
         else:
-            st.warning(f"⚠️ ผลทำนาย: ไม่บรรลุเป้าหมาย (คะแนน {pred:,.2f} < เกณฑ์ {threshold:,.2f})")
+            st.warning(f"⚠️ ผลทำนาย: ควรเสริมรายได้ก่อน (คะแนน {pred:,.2f} < เกณฑ์ {threshold:,.2f})")
 
         st.info(
             "โมเดลนี้เป็น Linear Regression จึงให้เป็น 'คะแนน' ไม่ใช่ความน่าจะเป็น "
