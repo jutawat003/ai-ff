@@ -42,6 +42,29 @@ DEFAULTS = {
 }
 
 
+# ชื่อภาษาไทยของแต่ละ feature (ถ้าไม่มีในรายการ จะแสดงชื่อคอลัมน์เดิม)
+LABELS_TH = {
+    "Monthly_Income": "รายได้ต่อเดือน",
+    "Monthly_Expenditure": "ค่าใช้จ่ายต่อเดือน",
+    "Market_Volatility_Index": "ดัชนีความผันผวนของตลาด",
+    "Inflation_Rate": "อัตราเงินเฟ้อ",
+    "Investment_Amount": "จำนวนเงินลงทุน",
+    "Savings_Ratio": "สัดส่วนการออม",
+    "Credit_Score": "คะแนนเครดิต",
+    "Debt_to_Income_Ratio": "สัดส่วนหนี้ต่อรายได้",
+    "Risk_Tolerance_Level": "ระดับการรับความเสี่ยง",
+    "Economic_Sentiment_Score": "คะแนนความเชื่อมั่นทางเศรษฐกิจ",
+    "Investor_Confidence": "ความมั่นใจของนักลงทุน",
+    "Financial_Stability_Index": "ดัชนีความมั่นคงทางการเงิน",
+    "Investment_Recommendation_Score": "คะแนนแนะนำการลงทุน",
+}
+
+
+def th(name: str) -> str:
+    """คืนชื่อภาษาไทยของคอลัมน์ (ถ้าไม่มีให้คืนชื่อเดิม)"""
+    return LABELS_TH.get(name, name)
+
+
 # ------------------------------------------------------------------
 # 2) ฟังก์ชันโหลดโมเดล (cache ไว้ จะได้ไม่โหลดซ้ำทุกครั้งที่กดปุ่ม)
 # ------------------------------------------------------------------
@@ -86,12 +109,13 @@ left, right = st.columns(2)
 for i, var in enumerate(domain.attributes):
     with (left if i % 2 == 0 else right):
         if var.is_discrete:
-            inputs[var.name] = st.selectbox(var.name, list(var.values), key=f"in_{model_file}_{var.name}")
+            inputs[var.name] = st.selectbox(th(var.name), list(var.values), help=var.name, key=f"in_{model_file}_{var.name}")
         else:
             inputs[var.name] = st.number_input(
-                var.name,
+                th(var.name),
                 value=float(DEFAULTS.get(var.name, 0.0)),
                 format="%.4f",
+                help=var.name,  # ชื่อคอลัมน์เดิม (ภาษาอังกฤษ) แสดงเมื่อเอาเมาส์ชี้ไอคอน ?
                 key=f"in_{model_file}_{var.name}",
             )
 
@@ -99,7 +123,7 @@ for i, var in enumerate(domain.attributes):
 threshold = None
 if not is_classification:
     threshold = st.number_input(
-        f"เกณฑ์คะแนน {class_var.name} ที่ถือว่า 'บรรลุเป้าหมาย' (ตั้งแต่ค่านี้ขึ้นไป)",
+        f"เกณฑ์{th(class_var.name)}ที่ถือว่า 'บรรลุเป้าหมาย' (ตั้งแต่ค่านี้ขึ้นไป)",
         value=50.0,
         format="%.2f",
         help="ปรับให้เหมาะกับช่วงคะแนนในข้อมูลของคุณ",
@@ -134,7 +158,7 @@ if st.button("ทำนายผล"):
     else:
         # ---------- Regression: ได้คะแนนเป็นตัวเลข (ไม่มี Probability) ----------
         pred = float(model(data)[0])
-        st.metric(class_var.name, f"{pred:,.2f}")
+        st.metric(th(class_var.name), f"{pred:,.2f}")
 
         if pred >= threshold:
             st.success(f"✅ ผลทำนาย: บรรลุเป้าหมาย (คะแนน {pred:,.2f} ≥ เกณฑ์ {threshold:,.2f})")
