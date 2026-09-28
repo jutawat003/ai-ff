@@ -1,21 +1,22 @@
 import glob, os
 import streamlit as st
-st.title("ทดสอบ 2")
+st.title("ทดสอบ 3")
 
-folder = os.path.dirname(os.path.abspath(__file__))
-st.write("โฟลเดอร์:", folder)
-st.write("ไฟล์ในโฟลเดอร์:", sorted(os.listdir(folder)))
+try:
+    import joblib, Orange
+    from Orange.classification import Model
+    from Orange.data import Domain, Table
+    st.write("import Orange.classification / Orange.data สำเร็จ")
 
-files = glob.glob(os.path.join(folder, "*.pkcls"))
-st.write("พบไฟล์โมเดล:", [os.path.basename(f) for f in files])
+    folder = os.path.dirname(os.path.abspath(__file__))
+    model = joblib.load(os.path.join(folder, "investment_linear_regression_model.pkcls"))
+    domain = getattr(model, "original_domain", model.domain)
 
-if files:
-    try:
-        import joblib, Orange
-        model = joblib.load(files[0])
-        st.write("โหลดโมเดลสำเร็จ:", type(model).__name__)
-        domain = getattr(model, "original_domain", model.domain)
-        st.write("ตัวแปรต้น:", [a.name for a in domain.attributes])
-        st.write("ตัวแปรตาม:", domain.class_var.name if domain.class_var else None)
-    except Exception as e:
-        st.exception(e)
+    row = [0.0] * len(domain.attributes)
+    data = Table.from_list(Domain(domain.attributes), [row])
+    st.write("สร้าง Table สำเร็จ", data.X.shape)
+
+    pred = float(model(data)[0])
+    st.write("ทำนายสำเร็จ:", pred)
+except Exception as e:
+    st.exception(e)
