@@ -1,0 +1,6 @@
+streamlit==1.64.0
+scikit-learn==1.8.0
+pandas==2.3.3
+joblib==1.5.3
+numpy==2.3.5
+Orange3==3.40.0
