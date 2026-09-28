@@ -11,6 +11,7 @@ import glob
 import os
 
 import joblib
+import numpy as np
 import streamlit as st
 import Orange  # noqa: F401  (ต้อง import ไว้ เพราะไฟล์ .pkcls เป็นโมเดลของ Orange)
 from Orange.classification import Model
@@ -25,17 +26,16 @@ st.set_page_config(page_title="AI แนะนำอาชีพเสริม"
 POSITIVE_LABELS = {"1", "yes", "true", "บรรลุ", "บรรลุเป้าหมาย", "พร้อมต่อยอด"}
 
 # ------------------------------------------------------------------
-# เกณฑ์ที่ใช้ในแอป (ผู้พัฒนาตั้งเอง ไม่ได้มาจากโมเดลหรือชุดข้อมูล)
+# เกณฑ์ที่ใช้ในแอป (ผู้พัฒนาเลือกเอง โดยอิงการกระจายของข้อมูลฝึก 800 แถว)
 # แก้ตรงนี้ที่เดียว ทั้งตัวกฎและคำอธิบายบนหน้าเว็บจะเปลี่ยนตามอัตโนมัติ
-# ควรปรับให้ตรงกับการกระจายของข้อมูลจริง (ดูด้วย df.describe())
 # ------------------------------------------------------------------
-SCORE_THRESHOLD_DEFAULT = 30.0   # คะแนนแนะนำการลงทุนที่ถือว่า "พร้อมต่อยอด"
-DEBT_HIGH = 0.4                  # สัดส่วนหนี้ต่อรายได้ที่ถือว่าสูง
-RISK_LOW = 2                     # ระดับความเสี่ยงที่ถือว่าต่ำ (สมมติสเกล 1-5)
-RISK_HIGH = 4                    # ระดับความเสี่ยงที่ถือว่าสูง (สมมติสเกล 1-5)
-CREDIT_GOOD = 700                # คะแนนเครดิตที่ถือว่าดี
+SCORE_THRESHOLD_DEFAULT = 50.0   # ใกล้ค่ามัธยฐานของคะแนนในข้อมูลฝึก (≈ 49.7)
+DEBT_HIGH = 0.5                  # ใกล้เปอร์เซ็นไทล์ 75 ของสัดส่วนหนี้ (≈ 0.54)
+RISK_LOW = 0.3                   # ใกล้เปอร์เซ็นไทล์ 25 ของความเสี่ยง (≈ 0.27) สเกลจริง 0-1
+RISK_HIGH = 0.7                  # ใกล้เปอร์เซ็นไทล์ 75 ของความเสี่ยง (≈ 0.72) สเกลจริง 0-1
+CREDIT_GOOD = 730                # ใกล้เปอร์เซ็นไทล์ 75 ของคะแนนเครดิต (≈ 731)
 
-# ค่าเริ่มต้นของช่องกรอกแต่ละ feature (เป็นค่าตัวอย่างเท่านั้น แก้ให้ตรงกับข้อมูลของคุณได้)
+# ค่าเริ่มต้นของช่องกรอกแต่ละ feature (เป็นค่าตัวอย่างที่อยู่ในช่วงข้อมูลจริง)
 DEFAULTS = {
     "Monthly_Income": 30000.0,
     "Monthly_Expenditure": 20000.0,
@@ -45,9 +45,9 @@ DEFAULTS = {
     "Savings_Ratio": 0.2,
     "Credit_Score": 650.0,
     "Debt_to_Income_Ratio": 0.3,
-    "Risk_Tolerance_Level": 3.0,
+    "Risk_Tolerance_Level": 0.5,
     "Economic_Sentiment_Score": 0.5,
-    "Investor_Confidence": 0.5,
+    "Investor_Confidence": 50.0,
     "Financial_Stability_Index": 0.5,
 }
 
@@ -68,10 +68,26 @@ LABELS_TH = {
     "Investment_Recommendation_Score": "คะแนนแนะนำการลงทุน",
 }
 
+# คำอธิบายช่วงค่าของบางช่อง (อิงช่วงค่าในข้อมูลฝึก) แสดงเมื่อชี้ไอคอน ?
+HELP_TH = {
+    "Risk_Tolerance_Level": "ช่วงในข้อมูลจริง 0-1 ยิ่งสูงยิ่งรับความเสี่ยงได้มาก",
+    "Investor_Confidence": "ความมั่นใจในการตัดสินใจทางการเงิน ช่วงในข้อมูลจริงประมาณ 0-100 ยิ่งสูงยิ่งมั่นใจ",
+    "Economic_Sentiment_Score": "ช่วงในข้อมูลจริง -1 ถึง 1 ยิ่งสูงยิ่งมองเศรษฐกิจในแง่ดี",
+    "Financial_Stability_Index": "ช่วงในข้อมูลจริงประมาณ 0.4-0.8 ยิ่งสูงยิ่งมั่นคง",
+    "Savings_Ratio": "สัดส่วนรายได้ที่เก็บออม ช่วงในข้อมูลจริง 0.05-0.6",
+    "Debt_to_Income_Ratio": "หนี้รวมต่อรายได้ ช่วงในข้อมูลจริง 0.1-0.7",
+    "Credit_Score": "ช่วงในข้อมูลจริง 555-850",
+}
+
 
 def th(name: str) -> str:
     """คืนชื่อภาษาไทยของคอลัมน์ (ถ้าไม่มีให้คืนชื่อเดิม)"""
     return LABELS_TH.get(name, name)
+
+
+def fmt(x: float) -> str:
+    """จัดรูปแบบตัวเลขให้อ่านง่าย"""
+    return f"{x:,.0f}" if abs(x) >= 1000 else f"{x:,.2f}"
 
 
 # ------------------------------------------------------------------
@@ -84,14 +100,106 @@ def load_model(path: str):
 
 
 # ------------------------------------------------------------------
-# 3) ฟังก์ชันแนะนำอาชีพเสริม (แบบกฎที่เขียนเอง ไม่ได้มาจากโมเดล ML)
+# 3) อธิบายว่าอะไรทำให้คะแนนเป็นเท่านี้ (ใช้สัมประสิทธิ์ของโมเดลจริง)
+#    ผลต่อคะแนนของแต่ละปัจจัย = สัมประสิทธิ์ x (ค่าของคุณ - ค่าเฉลี่ยในข้อมูลฝึก)
+#    คะแนนเฉลี่ยของข้อมูลฝึก + ผลต่อคะแนนทุกปัจจัยรวมกัน = คะแนนที่ทำนาย
+# ------------------------------------------------------------------
+def compute_contributions(model, inputs: dict):
+    """คืน dict {rows, baseline, out_of_range, n, median} หรือ None ถ้าคำนวณไม่ได้
+    rows = [(ชื่อ, ค่าของผู้ใช้, ค่าเฉลี่ยข้อมูลฝึก, ผลต่อคะแนน)] เรียงตามขนาดผลกระทบ"""
+    try:
+        attrs = list(model.domain.attributes)
+        coefs = np.asarray(model.skl_model.coef_, dtype=float).ravel()
+        table = model.instances
+        X = np.asarray(table.X, dtype=float)
+        if len(coefs) != len(attrs) or X.shape[1] != len(attrs):
+            return None
+        means = np.nanmean(X, axis=0)
+        mins = np.nanmin(X, axis=0)
+        maxs = np.nanmax(X, axis=0)
+        baseline = float(model.skl_model.intercept_ + np.sum(coefs * means))
+
+        rows, out_of_range = [], []
+        for i, a in enumerate(attrs):
+            if a.is_discrete or a.name not in inputs:
+                continue
+            x = float(inputs[a.name])
+            rows.append((a.name, x, float(means[i]), float(coefs[i] * (x - means[i]))))
+            if x < mins[i] or x > maxs[i]:
+                out_of_range.append((a.name, float(mins[i]), float(maxs[i])))
+        rows.sort(key=lambda r: abs(r[3]), reverse=True)
+
+        y = np.asarray(table.Y, dtype=float).ravel()
+        return {
+            "rows": rows,
+            "baseline": baseline,
+            "out_of_range": out_of_range,
+            "n": int(len(y)),
+            "median": float(np.median(y)),
+        }
+    except Exception:
+        return None
+
+
+def top_names(rows, positive: bool, k: int = 2):
+    """ชื่อภาษาไทยของปัจจัยที่ส่งผลมากสุด (ขึ้น/ลง) ไม่เกิน k ปัจจัย"""
+    sel = [r for r in rows if (r[3] >= 0.5 if positive else r[3] <= -0.5)]
+    return [th(r[0]) for r in sel[:k]]
+
+
+def show_drivers(info, pred):
+    """แสดงปัจจัยที่ดันคะแนนขึ้น/ลงเทียบกับค่าเฉลี่ยของกลุ่มตัวอย่าง"""
+    st.subheader("อะไรทำให้คะแนนของคุณเป็นเท่านี้")
+    base = info["baseline"]
+    st.write(
+        f"คะแนนเฉลี่ยของกลุ่มตัวอย่างอยู่ที่ {base:,.1f} คะแนนของคุณคือ {pred:,.1f} "
+        f"({pred - base:+,.1f}) โดยแต่ละปัจจัยมีส่วนดังนี้"
+    )
+
+    ups = [r for r in info["rows"] if r[3] >= 0.5][:3]
+    downs = [r for r in info["rows"] if r[3] <= -0.5][:3]
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("**▲ ดันคะแนนขึ้น**")
+        if not ups:
+            st.caption("ไม่มีปัจจัยที่ดันขึ้นชัดเจน")
+        for name, x, mean, c in ups:
+            st.markdown(f"{th(name)}: **{c:+.1f}** คะแนน")
+            st.caption(f"ของคุณ {fmt(x)} | ค่าเฉลี่ยกลุ่มตัวอย่าง {fmt(mean)}")
+    with col2:
+        st.markdown("**▼ ดึงคะแนนลง**")
+        if not downs:
+            st.caption("ไม่มีปัจจัยที่ดึงลงชัดเจน")
+        for name, x, mean, c in downs:
+            st.markdown(f"{th(name)}: **{c:+.1f}** คะแนน")
+            st.caption(f"ของคุณ {fmt(x)} | ค่าเฉลี่ยกลุ่มตัวอย่าง {fmt(mean)}")
+
+    if info["out_of_range"]:
+        lines = ", ".join(
+            f"{th(n)} (ข้อมูลฝึกอยู่ในช่วง {fmt(lo)}-{fmt(hi)})" for n, lo, hi in info["out_of_range"]
+        )
+        st.warning(f"ค่าที่คุณกรอกบางช่องอยู่นอกช่วงข้อมูลที่ใช้ฝึกโมเดล ผลทำนายอาจไม่แม่นยำ: {lines}")
+
+    with st.expander("วิธีคำนวณส่วนนี้"):
+        st.markdown(
+            "ผลต่อคะแนนของแต่ละปัจจัย = สัมประสิทธิ์ของโมเดล × (ค่าของคุณ − ค่าเฉลี่ยของข้อมูลฝึก)  \n"
+            "เมื่อรวมทุกปัจจัยกับคะแนนเฉลี่ยของกลุ่มตัวอย่าง จะได้คะแนนที่โมเดลทำนายพอดี"
+        )
+        st.caption(
+            "ตัวเลขนี้บอกว่าโมเดลให้น้ำหนักปัจจัยใดมาก ไม่ได้บอกเหตุและผลในชีวิตจริง "
+            "ทิศทางของบางปัจจัยอาจไม่ตรงกับสามัญสำนึก เพราะโมเดลเรียนรู้จากรูปแบบในชุดข้อมูลที่ใช้ฝึก"
+        )
+
+
+# ------------------------------------------------------------------
+# 4) ฟังก์ชันแนะนำอาชีพเสริม (แบบกฎที่เขียนเอง ไม่ได้มาจากโมเดล ML)
 #    คืนรายการ (อาชีพ, คำอธิบายอาชีพ, เหตุผล, อ้างอิงจาก) ไม่เกิน 3 รายการ
 # ------------------------------------------------------------------
 def recommend_careers(v: dict, achieved: bool, score=None, threshold=None):
     income = v.get("Monthly_Income", 0.0)
     spend = v.get("Monthly_Expenditure", 0.0)
     debt = v.get("Debt_to_Income_Ratio", 0.0)
-    risk = v.get("Risk_Tolerance_Level", 3.0)
+    risk = v.get("Risk_Tolerance_Level", 0.5)
     credit = v.get("Credit_Score", 0.0)
     surplus = income - spend                     # เงินเหลือต่อเดือน
 
@@ -116,7 +224,7 @@ def recommend_careers(v: dict, achieved: bool, score=None, threshold=None):
     # กลุ่ม 2: ไม่ชอบความเสี่ยง
     elif risk <= RISK_LOW:
         why = f"ระดับการรับความเสี่ยงของคุณต่ำ ({risk:g}) จึงเหมาะกับงานที่ไม่ต้องลงทุนและไม่เสี่ยงขาดทุน"
-        basis = f"เกณฑ์: ความเสี่ยง ≤ {RISK_LOW} | ค่าของคุณ: ความเสี่ยง {risk:g}"
+        basis = f"เกณฑ์: ความเสี่ยง ≤ {RISK_LOW:g} | ค่าของคุณ: ความเสี่ยง {risk:g}"
         recs += [
             ("สอนพิเศษ/ติวออนไลน์",
              "รายได้ค่อนข้างสม่ำเสมอ ไม่ต้องลงทุนสต็อก", why, basis),
@@ -127,7 +235,7 @@ def recommend_careers(v: dict, achieved: bool, score=None, threshold=None):
     elif risk >= RISK_HIGH and surplus > 0:
         why = (f"คุณรับความเสี่ยงได้สูง ({risk:g}) และมีเงินเหลือ {surplus:,.0f} บาทต่อเดือน "
                "จึงมีทุนและความพร้อมรับความเสี่ยงสำหรับธุรกิจที่ต้องลงทุน")
-        basis = (f"เกณฑ์: ความเสี่ยง ≥ {RISK_HIGH} และเงินเหลือ > 0 บาท | "
+        basis = (f"เกณฑ์: ความเสี่ยง ≥ {RISK_HIGH:g} และเงินเหลือ > 0 บาท | "
                  f"ค่าของคุณ: ความเสี่ยง {risk:g}, เงินเหลือ {surplus:,.0f} บาท")
         recs += [
             ("เปิดร้านค้าออนไลน์แบบลงทุนสต็อกสินค้าเอง",
@@ -139,7 +247,7 @@ def recommend_careers(v: dict, achieved: bool, score=None, threshold=None):
     else:
         why = (f"ความเสี่ยงระดับกลาง ({risk:g}) และมีเงินเหลือ {surplus:,.0f} บาทต่อเดือน "
                "เหมาะกับงานที่ลงทุนไม่สูงและทำควบคู่งานประจำได้")
-        basis = (f"เกณฑ์: ความเสี่ยงอยู่ระหว่าง {RISK_LOW} ถึง {RISK_HIGH} และมีเงินเหลือ | "
+        basis = (f"เกณฑ์: ความเสี่ยงอยู่ระหว่าง {RISK_LOW:g} ถึง {RISK_HIGH:g} และมีเงินเหลือ | "
                  f"ค่าของคุณ: ความเสี่ยง {risk:g}, เงินเหลือ {surplus:,.0f} บาท")
         recs += [
             ("ขายของออนไลน์แบบพรีออเดอร์/ดรอปชิป",
@@ -170,60 +278,74 @@ def recommend_careers(v: dict, achieved: bool, score=None, threshold=None):
     return recs[:3]
 
 
-def show_criteria(threshold):
+def show_criteria(threshold, info=None):
     """อธิบายว่าเกณฑ์ต่าง ๆ ในแอปมาจากไหน"""
     thr = f"{threshold:,.2f}" if threshold is not None else f"{SCORE_THRESHOLD_DEFAULT:,.2f}"
+    if info:
+        origin = (f"ตั้งไว้ใกล้ค่ามัธยฐานของคะแนนในข้อมูลที่ใช้ฝึกโมเดล ({info['n']} แถว "
+                  f"มัธยฐาน ≈ {info['median']:.1f}) คือคะแนนสูงกว่าครึ่งหนึ่งของกลุ่มตัวอย่างถือว่าพร้อมต่อยอด")
+    else:
+        origin = "ผู้พัฒนาตั้งเอง ไม่ได้มาจากโมเดล"
     with st.expander("เกณฑ์ที่แอปใช้มาจากไหน?"):
         st.markdown(
             "**1) คะแนนแนะนำการลงทุน**  \n"
             "คำนวณโดยโมเดล Linear Regression ที่ฝึกจากชุดข้อมูล Financial Planning Optimization "
             "(Kaggle) ใช้ข้อมูลที่คุณกรอกทั้งหมดเป็นตัวแปรนำเข้า\n\n"
             f"**2) เกณฑ์ 'พร้อมต่อยอด' = {thr}**  \n"
-            "เป็นค่าที่ผู้พัฒนาตั้งเอง ไม่ได้มาจากโมเดล คะแนนถึงเกณฑ์ = พร้อมต่อยอด "
-            "ต่ำกว่าเกณฑ์ = ควรเสริมรายได้ก่อน คุณปรับค่านี้ได้ในช่องด้านบน\n\n"
-            "**3) เกณฑ์ที่ใช้เลือกอาชีพเสริม** (ผู้พัฒนาตั้งเอง)"
+            f"{origin} เกณฑ์นี้เป็นการเลือกของผู้พัฒนา ไม่ใช่ค่าที่โมเดลกำหนด "
+            "และปรับได้ในช่องด้านบน\n\n"
+            "**3) เกณฑ์ที่ใช้เลือกอาชีพเสริม**  \n"
+            "ผู้พัฒนาเลือกเอง โดยตั้งใกล้เปอร์เซ็นไทล์ 25/75 ของข้อมูลฝึก"
         )
         st.markdown(
             f"- เงินเหลือ ≤ 0 บาท หรือหนี้ต่อรายได้ ≥ {DEBT_HIGH:.0%} → งานที่ใช้ทุนน้อย  \n"
-            f"- ความเสี่ยง ≤ {RISK_LOW} → งานรายได้มั่นคง  \n"
-            f"- ความเสี่ยง ≥ {RISK_HIGH} และมีเงินเหลือ → ธุรกิจที่ต้องลงทุน  \n"
+            f"- ความเสี่ยง ≤ {RISK_LOW:g} → งานรายได้มั่นคง  \n"
+            f"- ความเสี่ยง ≥ {RISK_HIGH:g} และมีเงินเหลือ → ธุรกิจที่ต้องลงทุน  \n"
             f"- ความเสี่ยงอยู่ระหว่างนั้น → งานลงทุนต่ำถึงปานกลาง  \n"
             f"- พร้อมต่อยอด + มีเงินเหลือ + เครดิต ≥ {CREDIT_GOOD} → สินเชื่อ SME"
         )
         st.caption(
-            "ตัวเลขเกณฑ์ในข้อ 2-3 เป็นค่าประมาณเพื่อเป็นแนวทางเบื้องต้น ยังไม่ได้ปรับตามการกระจายของข้อมูลจริง "
-            "และไม่ใช่มาตรฐานทางการเงิน"
+            "ชุดข้อมูลไม่มีข้อมูลอาชีพ การจับคู่อาชีพจึงเป็นกฎที่ผู้พัฒนาตั้งขึ้น "
+            "ไม่ได้พิสูจน์ว่าอาชีพใดให้ผลดีกว่า จึงเป็นแนวทางเบื้องต้นเท่านั้น"
         )
 
 
-def show_careers(v: dict, achieved: bool, score=None, threshold=None):
+def show_careers(v: dict, achieved: bool, score=None, threshold=None, info=None):
     """แสดงผลอาชีพเสริมที่แนะนำ พร้อมเหตุผลและสิ่งที่ใช้อ้างอิง"""
     st.subheader("อาชีพเสริมที่แนะนำ")
 
+    rows = info["rows"] if info else []
     if achieved:
-        st.info("คะแนนของคุณถึงเกณฑ์ 'พร้อมต่อยอด' อาชีพเสริมด้านล่างช่วยเพิ่มรายได้หรือต่อยอดจากฐานการเงินที่มี")
+        msg = "คะแนนของคุณถึงเกณฑ์ 'พร้อมต่อยอด' อาชีพเสริมด้านล่างช่วยเพิ่มรายได้หรือต่อยอดจากฐานการเงินที่มี"
+        helpers = top_names(rows, positive=True)
+        if helpers:
+            msg += f" ปัจจัยที่ช่วยดันคะแนนมากที่สุดคือ {' และ '.join(helpers)}"
     else:
-        st.info("คะแนนของคุณต่ำกว่าเกณฑ์ จึงแนะนำให้เสริมรายได้ก่อน เพื่อเพิ่มความพร้อมทางการเงินในการลงทุนต่อไป")
+        msg = "คะแนนของคุณต่ำกว่าเกณฑ์ จึงแนะนำให้เสริมรายได้ก่อน เพื่อเพิ่มความพร้อมทางการเงินในการลงทุนต่อไป"
+        draggers = top_names(rows, positive=False)
+        if draggers:
+            msg += f" ปัจจัยที่ดึงคะแนนลงมากที่สุดคือ {' และ '.join(draggers)}"
+    st.info(msg)
 
     for title, desc, why, basis in recommend_careers(v, achieved, score, threshold):
         st.markdown(f"**{title}**  \n{desc}")
         st.caption(f"💡 ทำไมถึงแนะนำ: {why}")
         st.caption(f"📌 อ้างอิงจาก: {basis}")
 
-    show_criteria(threshold)
+    show_criteria(threshold, info)
     st.caption(
-        "หมายเหตุ: ส่วนนี้ใช้กฎที่เขียนขึ้นจากข้อมูลที่กรอก (เงินเหลือเก็บ หนี้ ความเสี่ยง เครดิต) "
+        "หมายเหตุ: การเลือกอาชีพใช้กฎที่เขียนขึ้นจากข้อมูลที่กรอก (เงินเหลือเก็บ หนี้ ความเสี่ยง เครดิต) "
         "ไม่ได้มาจากโมเดล AI ที่ฝึกไว้ จึงเป็นแนวทางเบื้องต้นเท่านั้น"
     )
 
 
 # ------------------------------------------------------------------
-# 4) หัวข้อแอป
+# 5) หัวข้อแอป
 # ------------------------------------------------------------------
 st.title("โปรแกรม AI แนะนำอาชีพเสริมที่เหมาะสม")
 
 # ------------------------------------------------------------------
-# 5) ส่วนเลือกโมเดล: ค้นหาไฟล์ *.pkcls ในโฟลเดอร์เดียวกับ app.py และโฟลเดอร์ models/
+# 6) ส่วนเลือกโมเดล: ค้นหาไฟล์ *.pkcls ในโฟลเดอร์เดียวกับ app.py และโฟลเดอร์ models/
 # ------------------------------------------------------------------
 folder = os.path.dirname(os.path.abspath(__file__))
 paths = sorted(
@@ -250,7 +372,7 @@ class_var = domain.class_var          # คอลัมน์เป้าหม�
 is_classification = class_var is not None and class_var.is_discrete
 
 # ------------------------------------------------------------------
-# 6) สร้างช่องกรอกข้อมูลตามคอลัมน์ที่ใช้ฝึกโมเดลจริงโดยอัตโนมัติ
+# 7) สร้างช่องกรอกข้อมูลตามคอลัมน์ที่ใช้ฝึกโมเดลจริงโดยอัตโนมัติ
 # ------------------------------------------------------------------
 st.subheader("กรอกข้อมูลของคุณ")
 
@@ -268,7 +390,7 @@ for i, var in enumerate(domain.attributes):
                 th(var.name),
                 value=float(DEFAULTS.get(var.name, 0.0)),
                 format="%.4f",
-                help=var.name,  # ชื่อคอลัมน์เดิม (ภาษาอังกฤษ) แสดงเมื่อเอาเมาส์ชี้ไอคอน ?
+                help=f"{var.name} | {HELP_TH[var.name]}" if var.name in HELP_TH else var.name,
                 key=f"in_{model_file}_{var.name}",
             )
 
@@ -279,17 +401,17 @@ if not is_classification:
         f"เกณฑ์{th(class_var.name)}ที่ถือว่า 'พร้อมต่อยอด' (ตั้งแต่ค่านี้ขึ้นไป)",
         value=SCORE_THRESHOLD_DEFAULT,
         format="%.2f",
-        help="ค่านี้ผู้พัฒนาตั้งเอง ไม่ได้มาจากโมเดล ปรับให้เหมาะกับช่วงคะแนนในข้อมูลของคุณได้",
+        help="ค่านี้ผู้พัฒนาเลือกเอง โดยอิงค่ามัธยฐานของคะแนนในข้อมูลฝึก ไม่ได้มาจากโมเดล ปรับได้ตามต้องการ",
     )
 
 # ------------------------------------------------------------------
-# 7) ปุ่มทำนาย
+# 8) ปุ่มทำนาย
 # ------------------------------------------------------------------
 if st.button("ทำนายผล"):
-    # 7.1 จัดข้อมูลเป็นแถวเดียว เรียงตามลำดับคอลัมน์ตอนฝึก
+    # 8.1 จัดข้อมูลเป็นแถวเดียว เรียงตามลำดับคอลัมน์ตอนฝึก
     row = [inputs[v.name] for v in domain.attributes]
 
-    # 7.2 แปลงเป็น Orange Table
+    # 8.2 แปลงเป็น Orange Table
     data = Table.from_list(Domain(domain.attributes), [row])
 
     st.subheader("ผลการทำนาย")
@@ -325,4 +447,8 @@ if st.button("ทำนายผล"):
             "โมเดลนี้เป็น Linear Regression จึงให้เป็น 'คะแนน' ไม่ใช่ความน่าจะเป็น "
             "หากต้องการ Probability ต้องฝึกโมเดลแบบ Classification"
         )
-        show_careers(inputs, achieved, pred, threshold)
+
+        info = compute_contributions(model, inputs)
+        if info:
+            show_drivers(info, pred)
+        show_careers(inputs, achieved, pred, threshold, info)
